@@ -1,6 +1,5 @@
 use std::fs;
-use std::io::Write;
-use std::path::{PathBuf, Path};
+use std::path::PathBuf;
 
 #[derive(Debug)]
 pub struct ProjectCreator {

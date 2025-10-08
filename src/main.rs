@@ -18,8 +18,10 @@ use catppuccin::PALETTE;
 use std::io;
 
 mod create_new_project;
+mod edit_project;
 
 use create_new_project::ProjectCreator;
+use edit_project::ProjectEditor;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AppMode {
@@ -37,6 +39,7 @@ pub struct App {
     pub mode: AppMode,
     pub selected_index: usize,
     pub project_creator: ProjectCreator,
+    pub project_editor: ProjectEditor,
     pub input_buffer: String,
     pub message: String,
     pub should_quit: bool
@@ -48,6 +51,7 @@ impl App {
             mode: AppMode::MainMenu,
             selected_index: 0,
             project_creator: ProjectCreator::new(),
+            project_editor: ProjectEditor::new(),
             input_buffer: String::new(),
             message: String::new(),
             should_quit: false
@@ -58,6 +62,7 @@ impl App {
         match self.mode {
             AppMode::MainMenu => self.handle_main_menu_key(key),
             AppMode::CreateProject => self.handle_create_project_key(key),
+            AppMode::EditProject => self.handle_edit_project_key(key),
             AppMode::InputDialog => self.handle_input_dialog_key(key),
             AppMode::MessageDialog => self.handle_message_dialog_key(key),
             _ => {
@@ -89,8 +94,9 @@ impl App {
                         self.mode = AppMode::MessageDialog;
                     }
                     2 => {
-                        self.message = "Edit project feature on da wae".to_string();
-                        self.mode = AppMode::MessageDialog;
+                        // Refresh project list when entering edit mode
+                        self.project_editor.refresh_projects();
+                        self.mode = AppMode::EditProject;
                     }
                     3 => {
                         self.message = "View Waveform feature on da wae".to_string();
@@ -112,6 +118,8 @@ impl App {
                         Ok(path) => {
                             self.message = format!("Project Created successfully at: {}", path.display());
                             self.project_creator.reset();
+                            // Refresh project editor list since we created a new project
+                            self.project_editor.refresh_projects();
                             self.mode = AppMode::MessageDialog;
                         }
                         Err(e) => {
@@ -128,6 +136,44 @@ impl App {
                 if c.is_alphanumeric() || c == '_' || c == '-' {
                     self.project_creator.project_name.push(c);
                 }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_edit_project_key(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Esc => self.mode = AppMode::MainMenu,
+            KeyCode::Up => {
+                self.project_editor.move_selection_up();
+            }
+            KeyCode::Down => {
+                self.project_editor.move_selection_down();
+            }
+            KeyCode::Enter => {
+                if self.project_editor.has_projects() {
+                    match self.project_editor.open_project_in_editor() {
+                        Ok(()) => {
+                            if let Some(project_name) = self.project_editor.get_selected_project_name() {
+                                self.message = format!("Opened project '{}' in editor", project_name);
+                            } else {
+                                self.message = "Project opened in editor".to_string();
+                            }
+                            self.mode = AppMode::MessageDialog;
+                        }
+                        Err(e) => {
+                            self.message = format!("Error opening project in editor: {}", e);
+                            self.mode = AppMode::MessageDialog;
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('r') => {
+                // Refresh project list
+                self.project_editor.refresh_projects();
+                self.message = format!("Refreshed project list. Found {} projects", 
+                    self.project_editor.project_count());
+                self.mode = AppMode::MessageDialog;
             }
             _ => {}
         }
@@ -174,6 +220,7 @@ fn ui(f: &mut Frame, app: &App) {
     match app.mode {
         AppMode::MainMenu => render_main_menu(f, app, chunks[0]),
         AppMode::CreateProject => render_create_project(f, app, chunks[0]),
+        AppMode::EditProject => render_edit_project(f, app, chunks[0]),
         AppMode::MessageDialog => {
             render_main_menu(f, app, chunks[0]);
             render_message_dialog(f, app);
@@ -285,6 +332,121 @@ fn render_create_project(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
     f.render_widget(title, layout[0]);
     f.render_widget(info, layout[1]);
     f.render_widget(input, layout[2]);
+    f.render_widget(preview, layout[3]);
+    f.render_widget(help, layout[4]);
+}
+
+fn render_edit_project(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let title = Paragraph::new("✏️  Edit Verilog Project")
+        .style(Style::default().fg(PALETTE.macchiato.colors.blue.into()).add_modifier(Modifier::BOLD))
+        .block(Block::default().borders(Borders::ALL));
+
+    let current_dir = std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| "Unknown".to_string());
+
+    let info_text = vec![
+        Line::from(vec![
+            Span::raw("Current Directory: "),
+            Span::styled(current_dir, Style::default().fg(PALETTE.macchiato.colors.yellow.into())),
+        ]),
+        Line::from(""),
+        Line::from(format!("Found {} Verilog project(s):", app.project_editor.project_count())),
+    ];
+
+    let info = Paragraph::new(info_text)
+        .block(Block::default().borders(Borders::ALL).title("Project Info"));
+
+    // Project list or empty message
+    let projects_widget = if app.project_editor.has_projects() {
+        let project_items: Vec<ListItem> = app.project_editor.projects
+            .iter()
+            .enumerate()
+            .map(|(i, project_path)| {
+                let project_name = project_path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+
+                let style = if i == app.project_editor.selected_project_index {
+                    Style::default().bg(PALETTE.macchiato.colors.yellow.into()).fg(Color::Black)
+                } else {
+                    Style::default()
+                };
+
+                // Show project name with file count
+                let files = app.project_editor.get_project_files(project_path);
+                let display_text = format!("📁 {} ({} files)", project_name, files.len());
+                ListItem::new(display_text).style(style)
+            })
+            .collect();
+
+        List::new(project_items)
+            .block(Block::default().title("Projects").borders(Borders::ALL))
+            .highlight_style(Style::default().bg(PALETTE.macchiato.colors.yellow.into()).fg(Color::Black))
+    } else {
+        List::new(vec![ListItem::new("No Verilog projects found in current directory")])
+            .block(Block::default().title("Projects").borders(Borders::ALL))
+            .style(Style::default().fg(Color::Gray))
+    };
+
+    // Preview of selected project files
+    let preview_text = if let Some(selected_path) = app.project_editor.get_selected_project_path() {
+        let files = app.project_editor.get_project_files(selected_path);
+        if !files.is_empty() {
+            let mut preview = format!("Will open in editor:\n📁 {}\n", 
+                selected_path.file_name().unwrap().to_string_lossy());
+            
+            for file in files.iter().take(8) { // Show max 8 files to avoid overflow
+                if let Some(file_name) = file.file_name() {
+                    let icon = match file.extension().and_then(|ext| ext.to_str()) {
+                        Some("v") => "📄",
+                        Some(_) => "📄",
+                        None => "⚡", // justfile has no extension
+                    };
+                    preview.push_str(&format!(" {} {}\n", icon, file_name.to_string_lossy()));
+                }
+            }
+            if files.len() > 8 {
+                preview.push_str(&format!(" ... and {} more files", files.len() - 8));
+            }
+            preview
+        } else {
+            "No editable files found in selected project".to_string()
+        }
+    } else {
+        "Select a project to see preview".to_string()
+    };
+
+    let preview = Paragraph::new(preview_text)
+        .style(Style::default().fg(Color::Gray))
+        .block(Block::default().borders(Borders::ALL).title("Preview"));
+
+    let help_text = if app.project_editor.has_projects() {
+        "Use ↑/↓ to navigate, Enter to edit project, 'r' to refresh, Esc to return to main menu"
+    } else {
+        "No projects found. Press 'r' to refresh, Esc to return to main menu"
+    };
+
+    let help = Paragraph::new(help_text)
+        .style(Style::default().fg(Color::Gray))
+        .block(Block::default().borders(Borders::ALL).title("Help"));
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Length(6),
+            Constraint::Min(6),
+            Constraint::Length(5),
+            Constraint::Length(3),
+        ])
+        .split(area);
+
+    f.render_widget(title, layout[0]);
+    f.render_widget(info, layout[1]);
+    f.render_widget(projects_widget, layout[2]);
     f.render_widget(preview, layout[3]);
     f.render_widget(help, layout[4]);
 }

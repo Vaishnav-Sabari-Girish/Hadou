@@ -9,6 +9,7 @@ keywords = ["tui", "verilog", "hdl", "terminal", "electronics"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
+catppuccin = { version = "2.5.1", features = ["ratatui"] }
 chrono = { version = "0.4.42", features = ["serde"] }
 crossterm = "0.29.0"
 ratatui = "0.29.0"

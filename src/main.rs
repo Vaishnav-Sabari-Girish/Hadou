@@ -7,13 +7,15 @@ use crossterm::{
 use ratatui::{
     backend::{Backend, CrosstermBackend},
     layout::{Constraint, Direction, Layout, Margin},
-    style::{Color, Modifier, Style},
+    style::{Color, Modifier, Style, Stylize},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Frame, Terminal
 };
 
-use std::io;
+use catppuccin::PALETTE;
+
+use std::{default, io};
 use std::path::PathBuf;
 
 mod create_new_project;
@@ -132,8 +134,87 @@ impl App {
         }
     }
 
+    fn handle_message_dialog_key(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Enter | KeyCode::Esc => {
+                self.message.clear();
+                self.mode = AppMode::MainMenu;
+            }
+            _ => {}
+        }
+    }
 }
 
+
+fn ui<B: Backend>(f: &mut Frame<B>, app: &App) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0)].as_ref())
+        .split(f.area());
+
+    match app.mode {
+        AppMode::MainMenu => render_main_menu(f, app, chunks[0]),
+        AppMode::CreateProject => render_create_project(f, app, chunks[0]),
+        AppMode::MessageDialog => {
+            render_main_menu(f, app, chunks[0]);
+            render_message_dialog(f, app);
+        }
+        _ => render_main_menu(f, app, chunks[0]),
+    }
+}
+
+fn render_main_menu<B: Backend>(f: &mut Frame<B>, app: &App, area: ratatui::layout::Rect) {
+    let title = Paragraph::new("🌊 Hadou - Verilog Project Manager")
+        .style(Style::default().fg(PALETTE.macchiato.colors.teal.into()).add_modifier(Modifier::BOLD))
+        .block(Block::default().borders(Borders::ALL));
+
+    let menu_items = vec![
+        "📁 Create New Project",
+        "⚙️  Compile Project", 
+        "✏️  Edit Project",
+        "📊 View Waveform",
+    ];
+
+    let items: Vec<ListItem> = menu_items
+    .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let style = if i == app.selected_index {
+                Style::default().bg(PALETTE.macchiato.colors.yellow.into()).fg(Color::Black)
+            } else {
+                Style::default()
+            };
+            ListItem::new(*item).style(style)
+        })
+            .collect();
+
+    let menu = List::new(items)
+        .block(Block::default().title("Menu").borders(Borders::ALL))
+        .highlight_style(Style::default().bg(PALETTE.macchiato.colors.yellow.into()).fg(Color::Black));
+
+    let help = Paragraph::new("Use ↑/↓ to navigate, Enter to select, 'q' or Esc to quit")
+        .style(Style::default().fg(Color::Gray))
+        .block(Block::default().borders(Borders::ALL).title("Help"));
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(8),
+            Constraint::Length(3),
+        ])
+            .split(area);
+
+    f.render_widget(title, layout[0]);
+    f.render_widget(menu, layout[1]);
+    f.render_widget(help, layout[2]);
+}
+
+fn render_create_project<B: Backend>(f: &mut Frame<B>, app: &App, area: ratatui::layout::Rect) {
+    let title = Paragraph::new("📁 Create New Verilog Project")
+        .style(Style::default().fg(PALETTE.macchiato.colors.green.into()).add_modifier(Modifier::BOLD))
+        .block(Block::default().borders(Borders::ALL));
+}
 
 fn main() {
     println!("Hello, world!");

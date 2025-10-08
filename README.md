@@ -3,6 +3,23 @@
 Hadou is a TUI for `iverilog`, providing options to Create projects, edit projects and view waveforms
 
 
+## Installation
+
+### Dependencies
+
+1. `just` = A command runner similar to `make`
+2. `iverilog` = Icarus Verilog
+3. `gtkwave` = Waveform viewing tool (Required for now)
+
+### Installing
+
+```bash
+git clone https://github.com/Vaishnav-Sabari-Girish/Hadou
+cd Hadou/
+cargo run --release
+```
+
+`crates.io` release expected soon.
 
 ## Features 
 

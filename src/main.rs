@@ -23,6 +23,7 @@ mod compile_project;
 
 use create_new_project::ProjectCreator;
 use edit_project::ProjectEditor;
+use compile_project::ProjectCompiler;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AppMode {
@@ -41,6 +42,7 @@ pub struct App {
     pub selected_index: usize,
     pub project_creator: ProjectCreator,
     pub project_editor: ProjectEditor,
+    pub project_compiler: ProjectCompiler,
     pub input_buffer: String,
     pub message: String,
     pub should_quit: bool
@@ -53,6 +55,7 @@ impl App {
             selected_index: 0,
             project_creator: ProjectCreator::new(),
             project_editor: ProjectEditor::new(),
+            project_compiler: ProjectCompiler::new(),
             input_buffer: String::new(),
             message: String::new(),
             should_quit: false
@@ -63,6 +66,7 @@ impl App {
         match self.mode {
             AppMode::MainMenu => self.handle_main_menu_key(key),
             AppMode::CreateProject => self.handle_create_project_key(key),
+            AppMode::CompileProject => self.handle_compile_project_key(key),
             AppMode::EditProject => self.handle_edit_project_key(key),
             AppMode::InputDialog => self.handle_input_dialog_key(key),
             AppMode::MessageDialog => self.handle_message_dialog_key(key),
@@ -91,8 +95,9 @@ impl App {
                 match self.selected_index {
                     0 => self.mode = AppMode::CreateProject,
                     1 => {
-                        self.message = "Compile project feature on da wae".to_string();
-                        self.mode = AppMode::MessageDialog;
+                        // Refresh project list when entering compile mode
+                        self.project_compiler.refresh_projects();
+                        self.mode = AppMode::CompileProject;
                     }
                     2 => {
                         // Refresh project list when entering edit mode
@@ -119,8 +124,9 @@ impl App {
                         Ok(path) => {
                             self.message = format!("Project Created successfully at: {}", path.display());
                             self.project_creator.reset();
-                            // Refresh project editor list since we created a new project
+                            // Refresh both editor and compiler lists since we created a new project
                             self.project_editor.refresh_projects();
+                            self.project_compiler.refresh_projects();
                             self.mode = AppMode::MessageDialog;
                         }
                         Err(e) => {
@@ -137,6 +143,50 @@ impl App {
                 if c.is_alphanumeric() || c == '_' || c == '-' {
                     self.project_creator.project_name.push(c);
                 }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_compile_project_key(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Esc => self.mode = AppMode::MainMenu,
+            KeyCode::Up => {
+                self.project_compiler.move_project_selection_up();
+            }
+            KeyCode::Down => {
+                self.project_compiler.move_project_selection_down();
+            }
+            KeyCode::Left => {
+                self.project_compiler.move_action_selection_up();
+            }
+            KeyCode::Right => {
+                self.project_compiler.move_action_selection_down();
+            }
+            KeyCode::Enter => {
+                if self.project_compiler.has_projects() && !self.project_compiler.is_compiling {
+                    match self.project_compiler.execute_compilation() {
+                        Ok(success_msg) => {
+                            self.message = success_msg;
+                            self.mode = AppMode::MessageDialog;
+                        }
+                        Err(e) => {
+                            self.message = format!("Compilation failed: {}", e);
+                            self.mode = AppMode::MessageDialog;
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('r') => {
+                // Refresh project list
+                self.project_compiler.refresh_projects();
+                self.message = format!("Refreshed project list. Found {} projects", 
+                    self.project_compiler.project_count());
+                self.mode = AppMode::MessageDialog;
+            }
+            KeyCode::Char('c') => {
+                // Clear compilation output
+                self.project_compiler.clear_compilation_output();
             }
             _ => {}
         }
@@ -221,6 +271,7 @@ fn ui(f: &mut Frame, app: &App) {
     match app.mode {
         AppMode::MainMenu => render_main_menu(f, app, chunks[0]),
         AppMode::CreateProject => render_create_project(f, app, chunks[0]),
+        AppMode::CompileProject => render_compile_project(f, app, chunks[0]),
         AppMode::EditProject => render_edit_project(f, app, chunks[0]),
         AppMode::MessageDialog => {
             render_main_menu(f, app, chunks[0]);
@@ -237,8 +288,8 @@ fn render_main_menu(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     let menu_items = vec![
         "📁 Create New Project",
-        "⚙️  Compile Project", 
         "✏️  Edit Project",
+        "⚙️  Compile Project", 
         "📊 View Waveform",
     ];
 
@@ -335,6 +386,168 @@ fn render_create_project(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
     f.render_widget(input, layout[2]);
     f.render_widget(preview, layout[3]);
     f.render_widget(help, layout[4]);
+}
+
+fn render_compile_project(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let title = Paragraph::new("⚙️  Compile Verilog Project")
+        .style(Style::default().fg(PALETTE.macchiato.colors.red.into()).add_modifier(Modifier::BOLD))
+        .block(Block::default().borders(Borders::ALL));
+
+    let current_dir = std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| "Unknown".to_string());
+
+    let info_text = vec![
+        Line::from(vec![
+            Span::raw("Current Directory: "),
+            Span::styled(current_dir, Style::default().fg(PALETTE.macchiato.colors.yellow.into())),
+        ]),
+        Line::from(""),
+        Line::from(format!("Found {} Verilog project(s):", app.project_compiler.project_count())),
+    ];
+
+    let info = Paragraph::new(info_text)
+        .block(Block::default().borders(Borders::ALL).title("Project Info"));
+
+    // Create horizontal layout for projects and actions
+    let main_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(area);
+
+    let left_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Length(6),
+            Constraint::Min(8),
+            Constraint::Length(3),
+        ])
+        .split(main_layout[0]);
+
+    let right_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(8),
+            Constraint::Length(6),
+        ])
+        .split(main_layout[1]);
+
+    // Projects list
+    let projects_widget = if app.project_compiler.has_projects() {
+        let project_items: Vec<ListItem> = app.project_compiler.projects
+            .iter()
+            .enumerate()
+            .map(|(i, project_path)| {
+                let project_name = project_path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+
+                let style = if i == app.project_compiler.selected_project_index {
+                    Style::default().bg(PALETTE.macchiato.colors.yellow.into()).fg(Color::Black)
+                } else {
+                    Style::default()
+                };
+
+                // Show project name with verilog file count and justfile status
+                let verilog_files = app.project_compiler.get_verilog_files(project_path);
+                let has_justfile = app.project_compiler.has_justfile(project_path);
+                let justfile_indicator = if has_justfile { "⚡" } else { "❌" };
+                
+                let display_text = format!("📁 {} ({} .v files) {}", 
+                    project_name, verilog_files.len(), justfile_indicator);
+                ListItem::new(display_text).style(style)
+            })
+            .collect();
+
+        List::new(project_items)
+            .block(Block::default().title("Projects").borders(Borders::ALL))
+            .highlight_style(Style::default().bg(PALETTE.macchiato.colors.yellow.into()).fg(Color::Black))
+    } else {
+        List::new(vec![ListItem::new("No Verilog projects found in current directory")])
+            .block(Block::default().title("Projects").borders(Borders::ALL))
+            .style(Style::default().fg(Color::Gray))
+    };
+
+    // Actions list
+    let action_items: Vec<ListItem> = app.project_compiler.available_actions
+        .iter()
+        .enumerate()
+        .map(|(i, action)| {
+            let style = if i == app.project_compiler.selected_action_index {
+                Style::default().bg(PALETTE.macchiato.colors.blue.into()).fg(Color::White)
+            } else {
+                Style::default()
+            };
+
+            let display_text = format!("{} {}", action.icon(), action.description());
+            ListItem::new(display_text).style(style)
+        })
+        .collect();
+
+    let actions_widget = List::new(action_items)
+        .block(Block::default().title("Actions").borders(Borders::ALL))
+        .highlight_style(Style::default().bg(PALETTE.macchiato.colors.blue.into()).fg(Color::White));
+
+    // Preview of selected project
+    let preview_text = if let Some(selected_path) = app.project_compiler.get_selected_project_path() {
+        let verilog_files = app.project_compiler.get_verilog_files(selected_path);
+        let has_justfile = app.project_compiler.has_justfile(selected_path);
+        
+        if !verilog_files.is_empty() {
+            let mut preview = format!("Selected Project:\n📁 {}\n", 
+                selected_path.file_name().unwrap().to_string_lossy());
+            
+            preview.push_str(&format!("\nJustfile: {}\n", if has_justfile { "✅ Found" } else { "❌ Missing" }));
+            
+            preview.push_str("\nVerilog files:\n");
+            for file in verilog_files.iter().take(6) {
+                if let Some(file_name) = file.file_name() {
+                    preview.push_str(&format!(" 📄 {}\n", file_name.to_string_lossy()));
+                }
+            }
+            if verilog_files.len() > 6 {
+                preview.push_str(&format!(" ... and {} more files", verilog_files.len() - 6));
+            }
+            
+            if let Some(action) = app.project_compiler.get_selected_action() {
+                preview.push_str(&format!("\nWill execute: just {}", action.as_just_recipe()));
+            }
+            
+            preview
+        } else {
+            "No Verilog files found in selected project".to_string()
+        }
+    } else {
+        "Select a project to see preview".to_string()
+    };
+
+    let preview = Paragraph::new(preview_text)
+        .style(Style::default().fg(Color::Gray))
+        .block(Block::default().borders(Borders::ALL).title("Preview"));
+
+    let help_text = if app.project_compiler.has_projects() {
+        "↑/↓ select project, ←/→ select action, Enter to execute, 'r' refresh, 'c' clear output, Esc to return"
+    } else {
+        "No projects found. Press 'r' to refresh, Esc to return to main menu"
+    };
+
+    let help = Paragraph::new(help_text)
+        .style(Style::default().fg(Color::Gray))
+        .block(Block::default().borders(Borders::ALL).title("Help"));
+
+    // Render left side (title, info, projects, help)
+    f.render_widget(title, left_layout[0]);
+    f.render_widget(info, left_layout[1]);
+    f.render_widget(projects_widget, left_layout[2]);
+    f.render_widget(help, left_layout[3]);
+
+    // Render right side (actions, preview)
+    f.render_widget(actions_widget, right_layout[1]);
+    f.render_widget(preview, right_layout[2]);
 }
 
 fn render_edit_project(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {

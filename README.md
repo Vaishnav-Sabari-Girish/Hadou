@@ -13,6 +13,14 @@ Hadou is a TUI for `iverilog`, providing options to Create projects, edit projec
 
 ### Installing
 
+#### From crates.io
+
+```bash
+cargo install hadou
+```
+
+#### From source
+
 ```bash
 git clone https://github.com/Vaishnav-Sabari-Girish/Hadou
 cd Hadou/

@@ -19,6 +19,7 @@ use std::io;
 
 mod create_new_project;
 mod edit_project;
+mod compile_project;
 
 use create_new_project::ProjectCreator;
 use edit_project::ProjectEditor;

@@ -61,9 +61,7 @@ impl ProjectCreator {
 
     fn generate_main_v_content(&self) -> String {
         format!(
-r#"`timescale 1ns / 1ps
-
-//////////////////////////////////////////////////////////////////////////////////
+r#"//////////////////////////////////////////////////////////////////////////////////
 // Company: 
 // Engineer: 
 // 
@@ -84,24 +82,7 @@ r#"`timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
 
 module {} (
-    input wire clk,
-    input wire reset,
-    output reg [7:0] data_out
 );
-
-    // Internal registers and wires
-    reg [7:0] counter;
-    
-    // Main logic
-    always @(posedge clk or posedge reset) begin
-        if (reset) begin
-            counter <= 8'b0;
-            data_out <= 8'b0;
-        end else begin
-            counter <= counter + 1;
-            data_out <= counter;
-        end
-    end
 
 endmodule
 "#,
@@ -115,9 +96,7 @@ endmodule
 
     fn generate_testbench_content(&self) -> String {
         format!(
-r#"`timescale 1ns / 1ps
-
-//////////////////////////////////////////////////////////////////////////////////
+r#"//////////////////////////////////////////////////////////////////////////////////
 // Company: 
 // Engineer: 
 // 
@@ -138,51 +117,8 @@ r#"`timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
 
 module {}_test;
-
-    // Inputs
-    reg clk;
-    reg reset;
-    
-    // Outputs
-    wire [7:0] data_out;
-    
-    // Instantiate the Unit Under Test (UUT)
-    {} uut (
-        .clk(clk),
-        .reset(reset),
-        .data_out(data_out)
-    );
-    
-    // Clock generation
-    always #5 clk = ~clk; // 100MHz clock (10ns period)
-    
     initial begin
-        // Initialize inputs
-        clk = 0;
-        reset = 0;
-        
-        // Add stimulus here
         $display("Starting simulation...");
-        
-        // Apply reset
-        reset = 1;
-        #20;
-        reset = 0;
-        
-        // Let it run for some cycles
-        #200;
-        
-        $display("Simulation completed at time %t", $time);
-        $finish;
-    end
-    
-    // Monitor changes
-    initial begin
-        $monitor("Time=%t, Reset=%b, Data_out=%d", $time, reset, data_out);
-    end
-    
-    // Generate VCD file for waveform viewing
-    initial begin
         $dumpfile("{}.vcd");
         $dumpvars(0, {}_test);
     end

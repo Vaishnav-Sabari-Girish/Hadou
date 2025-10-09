@@ -95,14 +95,14 @@ impl App {
                 match self.selected_index {
                     0 => self.mode = AppMode::CreateProject,
                     1 => {
-                        // Refresh project list when entering compile mode
-                        self.project_compiler.refresh_projects();
-                        self.mode = AppMode::CompileProject;
-                    }
-                    2 => {
                         // Refresh project list when entering edit mode
                         self.project_editor.refresh_projects();
                         self.mode = AppMode::EditProject;
+                    }
+                    2 => {
+                        // Refresh project list when entering compile mode
+                        self.project_compiler.refresh_projects();
+                        self.mode = AppMode::CompileProject;
                     }
                     3 => {
                         self.message = "View Waveform feature on da wae".to_string();

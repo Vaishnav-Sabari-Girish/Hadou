@@ -33,6 +33,6 @@ cargo run --release
 
 1. [x] Create New projects
     - [x] Write verilog code
-    - [ ] Compile it and generate `.vcd` file
-2. [ ] Edit projects
+    - [x] Compile it and generate `.vcd` file
+2. [x] Edit projects
 3. [ ] View waveform from `.vcd` files

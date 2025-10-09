@@ -133,7 +133,6 @@ endmodule
             self.project_name,
             self.project_name,
             self.project_name,
-            self.project_name,
         )
     }
 

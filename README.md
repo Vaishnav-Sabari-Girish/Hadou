@@ -9,7 +9,7 @@ Hadou is a TUI for `iverilog`, providing options to Create projects, edit projec
 
 1. `just` = A command runner similar to `make`
 2. `iverilog` = Icarus Verilog
-3. `gtkwave` = Waveform viewing tool (Required for now)
+3. `dwfv` = A TUI waveform fiewer for .vcd files.
 
 ### Installing
 

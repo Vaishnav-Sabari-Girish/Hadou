@@ -117,6 +117,11 @@ r#"/////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////
 
 module {}_test;
+    
+
+    {} uut (
+
+    );
     initial begin
         $display("Starting simulation...");
         $dumpfile("{}.vcd");
@@ -126,6 +131,7 @@ module {}_test;
 endmodule
 "#,
             chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+            self.project_name,
             self.project_name,
             self.project_name,
             self.project_name,

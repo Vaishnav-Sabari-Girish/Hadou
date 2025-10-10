@@ -16,6 +16,7 @@ use ratatui::{
 use catppuccin::PALETTE;
 
 use std::io;
+use std::path::PathBuf;
 
 mod create_new_project;
 mod edit_project;
@@ -43,6 +44,8 @@ pub struct App {
     pub project_creator: ProjectCreator,
     pub project_editor: ProjectEditor,
     pub project_compiler: ProjectCompiler,
+    pub vcd_files: Vec<PathBuf>,
+    pub selected_vcd_index: usize,
     pub input_buffer: String,
     pub message: String,
     pub should_quit: bool
@@ -50,16 +53,94 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
-        Self {
+        let mut app = Self {
             mode: AppMode::MainMenu,
             selected_index: 0,
             project_creator: ProjectCreator::new(),
             project_editor: ProjectEditor::new(),
             project_compiler: ProjectCompiler::new(),
+            vcd_files: Vec::new(),
+            selected_vcd_index: 0,
             input_buffer: String::new(),
             message: String::new(),
             should_quit: false
+        };
+        app.scan_vcd_files();
+        app
+    }
+
+    fn scan_vcd_files(&mut self) {
+        self.vcd_files.clear();
+        self.selected_vcd_index = 0;
+
+        // Scan current directory for VCD files
+        if let Ok(entries) = std::fs::read_dir(".") {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("vcd") {
+                    self.vcd_files.push(path);
+                }
+            }
         }
+
+        // Also scan subdirectories
+        if let Ok(entries) = std::fs::read_dir(".") {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if let Ok(sub_entries) = std::fs::read_dir(&path) {
+                        for sub_entry in sub_entries.flatten() {
+                            let sub_path = sub_entry.path();
+                            if sub_path.is_file() && sub_path.extension().and_then(|s| s.to_str()) == Some("vcd") {
+                                self.vcd_files.push(sub_path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sort VCD files alphabetically
+        self.vcd_files.sort();
+    }
+
+    fn launch_waveform_viewer(&mut self) {
+        if self.vcd_files.is_empty() {
+            self.message = "No VCD files found. Run a simulation first!".to_string();
+            self.mode = AppMode::MessageDialog;
+            return;
+        }
+
+        let vcd_file = &self.vcd_files[self.selected_vcd_index];
+
+        // Try different waveform viewers in order of preference
+        let viewers = [
+            ("dwfv", vec![vcd_file.to_string_lossy().to_string()]),
+            ("digisurf", vec!["-f".to_string(), vcd_file.to_string_lossy().to_string()]),
+            ("gtkwave", vec![vcd_file.to_string_lossy().to_string()]),
+        ];
+
+        for (viewer, args) in &viewers {
+            match std::process::Command::new(viewer).args(args).spawn() {
+                Ok(mut child) => {
+                    // Show a message that the viewer is launching
+                    self.message = format!("Launching {} with {}\n\nHadou will exit when you close the waveform viewer.", viewer, vcd_file.display());
+                    self.mode = AppMode::MessageDialog;
+
+                    // Wait for the external viewer to exit, then quit Hadou
+                    std::thread::spawn(move || {
+                        let _ = child.wait();
+                        std::process::exit(0);
+                    });
+
+                    return;
+                }
+                Err(_) => continue,
+            }
+        }
+
+        self.message = "No waveform viewers found!\n\nInstall options:\n• cargo install dwfv (recommended)\n• cargo install digisurf\n• sudo apt install gtkwave".to_string();
+        self.mode = AppMode::MessageDialog;
     }
 
     pub fn on_key(&mut self, key: KeyCode) {
@@ -68,13 +149,9 @@ impl App {
             AppMode::CreateProject => self.handle_create_project_key(key),
             AppMode::CompileProject => self.handle_compile_project_key(key),
             AppMode::EditProject => self.handle_edit_project_key(key),
+            AppMode::ViewWaveform => self.handle_view_waveform_key(key),
             AppMode::InputDialog => self.handle_input_dialog_key(key),
             AppMode::MessageDialog => self.handle_message_dialog_key(key),
-            _ => {
-                if key == KeyCode::Esc {
-                    self.mode = AppMode::MainMenu;
-                }
-            }
         }
     }
 
@@ -89,7 +166,7 @@ impl App {
                     3
                 } else {
                         self.selected_index - 1
-                };
+                    };
             },
             KeyCode::Enter => {
                 match self.selected_index {
@@ -105,8 +182,9 @@ impl App {
                         self.mode = AppMode::CompileProject;
                     }
                     3 => {
-                        self.message = "View Waveform feature on da wae".to_string();
-                        self.mode = AppMode::MessageDialog;
+                        // Refresh VCD files and enter waveform mode
+                        self.scan_vcd_files();
+                        self.mode = AppMode::ViewWaveform;
                     }
                     _ => {}
                 }
@@ -168,6 +246,8 @@ impl App {
                     match self.project_compiler.execute_compilation() {
                         Ok(success_msg) => {
                             self.message = success_msg;
+                            // Refresh VCD files since compilation might have generated new ones
+                            self.scan_vcd_files();
                             self.mode = AppMode::MessageDialog;
                         }
                         Err(e) => {
@@ -230,6 +310,41 @@ impl App {
         }
     }
 
+    fn handle_view_waveform_key(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Esc => self.mode = AppMode::MainMenu,
+            KeyCode::Up => {
+                if !self.vcd_files.is_empty() {
+                    self.selected_vcd_index = if self.selected_vcd_index == 0 {
+                        self.vcd_files.len() - 1
+                    } else {
+                            self.selected_vcd_index - 1
+                        };
+                }
+            }
+            KeyCode::Down => {
+                if !self.vcd_files.is_empty() {
+                    self.selected_vcd_index = (self.selected_vcd_index + 1) % self.vcd_files.len();
+                }
+            }
+            KeyCode::Enter => {
+                self.launch_waveform_viewer();
+            }
+            KeyCode::Char('r') => {
+                // Refresh VCD files
+                self.scan_vcd_files();
+                self.message = format!("Refreshed VCD files. Found {} files", self.vcd_files.len());
+                self.mode = AppMode::MessageDialog;
+            }
+            KeyCode::Char('i') => {
+                // Show install instructions
+                self.message = "Waveform Viewer Installation:\n\n• DWFV (recommended): cargo install dwfv\n• DigiSurf: cargo install digisurf\n• GTKWave: sudo apt install gtkwave\n\nDWFV provides the best terminal experience with vi-like keybindings!".to_string();
+                self.mode = AppMode::MessageDialog;
+            }
+            _ => {}
+        }
+    }
+
     fn handle_input_dialog_key(&mut self, key: KeyCode) {
         match key {
             KeyCode::Esc => {
@@ -273,6 +388,7 @@ fn ui(f: &mut Frame, app: &App) {
         AppMode::CreateProject => render_create_project(f, app, chunks[0]),
         AppMode::CompileProject => render_compile_project(f, app, chunks[0]),
         AppMode::EditProject => render_edit_project(f, app, chunks[0]),
+        AppMode::ViewWaveform => render_view_waveform(f, app, chunks[0]),
         AppMode::MessageDialog => {
             render_main_menu(f, app, chunks[0]);
             render_message_dialog(f, app);
@@ -456,7 +572,7 @@ fn render_compile_project(f: &mut Frame, app: &App, area: ratatui::layout::Rect)
                 let verilog_files = app.project_compiler.get_verilog_files(project_path);
                 let has_justfile = app.project_compiler.has_justfile(project_path);
                 let justfile_indicator = if has_justfile { "⚡" } else { "❌" };
-                
+
                 let display_text = format!("📁 {} ({} .v files) {}", 
                     project_name, verilog_files.len(), justfile_indicator);
                 ListItem::new(display_text).style(style)
@@ -496,13 +612,13 @@ fn render_compile_project(f: &mut Frame, app: &App, area: ratatui::layout::Rect)
     let preview_text = if let Some(selected_path) = app.project_compiler.get_selected_project_path() {
         let verilog_files = app.project_compiler.get_verilog_files(selected_path);
         let has_justfile = app.project_compiler.has_justfile(selected_path);
-        
+
         if !verilog_files.is_empty() {
             let mut preview = format!("Selected Project:\n📁 {}\n", 
                 selected_path.file_name().unwrap().to_string_lossy());
-            
+
             preview.push_str(&format!("\nJustfile: {}\n", if has_justfile { "✅ Found" } else { "❌ Missing" }));
-            
+
             preview.push_str("\nVerilog files:\n");
             for file in verilog_files.iter().take(6) {
                 if let Some(file_name) = file.file_name() {
@@ -512,11 +628,11 @@ fn render_compile_project(f: &mut Frame, app: &App, area: ratatui::layout::Rect)
             if verilog_files.len() > 6 {
                 preview.push_str(&format!(" ... and {} more files", verilog_files.len() - 6));
             }
-            
+
             if let Some(action) = app.project_compiler.get_selected_action() {
                 preview.push_str(&format!("\nWill execute: just {}", action.as_just_recipe()));
             }
-            
+
             preview
         } else {
             "No Verilog files found in selected project".to_string()
@@ -611,7 +727,7 @@ fn render_edit_project(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         if !files.is_empty() {
             let mut preview = format!("Will open in editor:\n📁 {}\n", 
                 selected_path.file_name().unwrap().to_string_lossy());
-            
+
             for file in files.iter().take(8) { // Show max 8 files to avoid overflow
                 if let Some(file_name) = file.file_name() {
                     let icon = match file.extension().and_then(|ext| ext.to_str()) {
@@ -662,6 +778,119 @@ fn render_edit_project(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     f.render_widget(info, layout[1]);
     f.render_widget(projects_widget, layout[2]);
     f.render_widget(preview, layout[3]);
+    f.render_widget(help, layout[4]);
+}
+
+fn render_view_waveform(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let title = Paragraph::new("📊 View Waveform with External Viewer")
+        .style(Style::default().fg(PALETTE.macchiato.colors.mauve.into()).add_modifier(Modifier::BOLD))
+        .block(Block::default().borders(Borders::ALL));
+
+    let current_dir = std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| "Unknown".to_string());
+
+    let info_text = vec![
+        Line::from(vec![
+            Span::raw("Current Directory: "),
+            Span::styled(current_dir, Style::default().fg(PALETTE.macchiato.colors.yellow.into())),
+        ]),
+        Line::from(""),
+        Line::from(format!("Found {} VCD file(s):", app.vcd_files.len())),
+    ];
+
+    let info = Paragraph::new(info_text)
+        .block(Block::default().borders(Borders::ALL).title("VCD Info"));
+
+    // VCD files list
+    let vcd_widget = if !app.vcd_files.is_empty() {
+        let vcd_items: Vec<ListItem> = app.vcd_files
+            .iter()
+            .enumerate()
+            .map(|(i, vcd_path)| {
+                let file_name = vcd_path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+
+                let parent_dir = vcd_path
+                    .parent()
+                    .and_then(|p| p.file_name())
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(".");
+
+                let style = if i == app.selected_vcd_index {
+                    Style::default().bg(PALETTE.macchiato.colors.yellow.into()).fg(Color::Black)
+                } else {
+                    Style::default()
+                };
+
+                let display_text = if parent_dir == "." {
+                    format!("📄 {}", file_name)
+                } else {
+                    format!("📄 {}/{}", parent_dir, file_name)
+                };
+
+                ListItem::new(display_text).style(style)
+            })
+            .collect();
+
+        List::new(vcd_items)
+            .block(Block::default().title("VCD Files").borders(Borders::ALL))
+            .highlight_style(Style::default().bg(PALETTE.macchiato.colors.yellow.into()).fg(Color::Black))
+    } else {
+        List::new(vec![ListItem::new("No VCD files found. Run a simulation first!")])
+            .block(Block::default().title("VCD Files").borders(Borders::ALL))
+            .style(Style::default().fg(Color::Gray))
+    };
+
+    // Viewer info
+    let viewer_info = vec![
+        Line::from("Supported Waveform Viewers:"),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("📊 DWFV", Style::default().fg(PALETTE.macchiato.colors.green.into()).add_modifier(Modifier::BOLD)),
+            Span::raw(" - Vi-like TUI waveform viewer (Recommended)"),
+        ]),
+        Line::from(vec![
+            Span::styled("⚡ DigiSurf", Style::default().fg(PALETTE.macchiato.colors.blue.into()).add_modifier(Modifier::BOLD)),
+            Span::raw(" - Modern TUI with command interface"),
+        ]),
+        Line::from(vec![
+            Span::styled("🖥️  GTKWave", Style::default().fg(PALETTE.macchiato.colors.yellow.into()).add_modifier(Modifier::BOLD)),
+            Span::raw(" - Traditional GUI waveform viewer"),
+        ]),
+    ];
+
+    let viewer_widget = Paragraph::new(viewer_info)
+        .block(Block::default().borders(Borders::ALL).title("Viewer Options"));
+
+    let help_text = if !app.vcd_files.is_empty() {
+        "↑/↓: Select VCD file | Enter: Launch viewer | 'r': Refresh | 'i': Install info | Esc: Return"
+    } else {
+        "'r': Refresh files | 'i': Install viewer info | Esc: Return to main menu"
+    };
+
+    let help = Paragraph::new(help_text)
+        .style(Style::default().fg(Color::Gray))
+        .block(Block::default().borders(Borders::ALL).title("Controls"));
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),  // Title
+            Constraint::Length(6),  // Info
+            Constraint::Min(8),     // VCD files
+            Constraint::Length(8),  // Viewer options
+            Constraint::Length(3),  // Help
+        ])
+        .split(area);
+
+    f.render_widget(title, layout[0]);
+    f.render_widget(info, layout[1]);
+    f.render_widget(vcd_widget, layout[2]);
+    f.render_widget(viewer_widget, layout[3]);
     f.render_widget(help, layout[4]);
 }
 
